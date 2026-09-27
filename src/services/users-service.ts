@@ -1,5 +1,5 @@
 import { db } from '../db';
-import { users } from '../db/schema';
+import { users, sessions } from '../db/schema';
 import { eq } from 'drizzle-orm';
 
 export async function registerUser(input: any) {
@@ -23,4 +23,30 @@ export async function registerUser(input: any) {
   });
 
   return true;
+}
+
+export async function loginUser(input: any) {
+  // Cari user berdasarkan email
+  const [user] = await db.select().from(users).where(eq(users.email, input.email));
+  if (!user) {
+    throw new Error("email atau password salah");
+  }
+
+  // Verifikasi kecocokan password
+  const isMatch = await Bun.password.verify(input.password, user.password, "bcrypt");
+  if (!isMatch) {
+    throw new Error("email atau password salah");
+  }
+
+  // Buat UUID token
+  const token = crypto.randomUUID();
+
+  // Simpan session ke database
+  await db.insert(sessions).values({
+    token: token,
+    userId: user.id,
+    password: user.password,
+  });
+
+  return token;
 }
