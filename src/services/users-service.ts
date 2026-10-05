@@ -50,3 +50,25 @@ export async function loginUser(input: any) {
 
   return token;
 }
+
+export async function getCurrentUser(token: string) {
+  // Cari session berdasarkan token
+  const [session] = await db.select().from(sessions).where(eq(sessions.token, token));
+  if (!session) {
+    throw new Error("unauthorized");
+  }
+
+  // Cari user berdasarkan session.userId
+  const [user] = await db.select().from(users).where(eq(users.id, session.userId));
+  if (!user) {
+    throw new Error("unauthorized");
+  }
+
+  // Kembalikan data user tanpa password
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    created_at: user.createdAt,
+  };
+}
