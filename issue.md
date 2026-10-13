@@ -1,216 +1,166 @@
-# Task Plan: Implementasi API Logout User (Menghapus Sesi Login)
+# Task Plan: Implementasi Automated Unit Test untuk Semua API Menggunakan Bun Test
 
-Dokumen ini berisi panduan implementasi langkah demi langkah (*step-by-step*) yang ditujukan untuk **junior programmer** atau **AI model** pelaksana. Ikuti setiap tahapan secara berurutan.
-
----
-
-## 1. Spesifikasi Fitur
-
-### A. Endpoint Logout User
-- **Method**: `DELETE`
-- **URL**: `/api/users/logout`
-- **Request Headers**:
-  - `Authorization: Bearer <token>`
-  *(Catatan: Token adalah string UUID sesi login yang tersimpan di tabel `sessions`).*
-
-### B. Aturan Bisnis
-- Jika token valid dan ditemukan di database tabel `sessions`, data session tersebut **harus dihapus** dari tabel `sessions`.
-- Jika header tidak ada, format salah, atau token tidak ditemukan di tabel `sessions`, kembalikan error **Unauthorized** (HTTP 401).
-
-### C. Response Body
-
-- **Response (Sukses - HTTP 200)**:
-  ```json
-  {
-    "data": "OK"
-  }
-  ```
-
-- **Response (Gagal / Token Tidak Valid / Unauthorized - HTTP 401)**:
-  ```json
-  {
-    "error": "Unauthorized"
-  }
-  ```
+Dokumen ini berisi perencanaan dan spesifikasi skenario pengujian (*test plan*) yang ditujukan untuk **junior programmer** atau **AI model** pelaksana. Dokumen ini menyajikan daftar skenario yang harus diuji secara terstruktur tanpa menyertakan kode implementasi mendetail, sehingga pelaksana dapat mengimplementasikan file pengujian secara mandiri.
 
 ---
 
-## 2. Struktur Direktori & Konvensi File
+## 1. Ringkasan & Tujuan
 
-Gunakan struktur folder dan konvensi penamaan yang sudah ada di proyek:
-```text
-src/
-├── db/
-│   ├── index.ts          # Koneksi Drizzle ke database
-│   └── schema.ts         # Definisi skema tabel (users & sessions)
-├── routes/
-│   └── users-route.ts    # Routing ElysiaJS (format: *-route.ts)
-├── services/
-│   └── users-service.ts  # Logic bisnis & interaksi DB (format: *-service.ts)
-└── index.ts              # Entry point server utama
-```
+Tujuan dari tugas ini adalah membangun automated unit test menyeluruh untuk memastikan seluruh endpoint API yang tersedia pada aplikasi berjalan stabil, aman, dan konsisten.
 
-> **Aturan Pemisahan Tanggung Jawab:**
-> - `routes/users-route.ts`: Bertanggung jawab mengekstrak header `Authorization`, memvalidasi format `Bearer <token>`, memanggil service logout, serta mengatur status code (200 / 401) dan response JSON.
-> - `services/users-service.ts`: Bertanggung jawab memeriksa keberadaan token di tabel `sessions` dan menjalankan query delete untuk menghapus session tersebut.
+- **Test Runner**: [Bun Test](https://bun.sh/docs/cli/test) bawaan dari Bun runtime (`bun test`).
+- **Lokasi File**: Disimpan di dalam direktori `tests/`.
+- **Konsistensi Data**: Database harus dibersihkan sebelum setiap skenario test dijalankan agar tidak terjadi ketergantungan antar test (*test isolation*).
 
 ---
 
-## 3. Alur Kerja Logika Bisnis (Logout Flow)
+## 2. Ketentuan & Arsitektur Pengujian
 
-```text
-[Client Request DELETE /api/users/logout]
-                     │
-                     ▼
-  [Header 'authorization' ada dan berawalan 'Bearer '?]
-          ├── Tidak ──► Return HTTP 401: {"error": "Unauthorized"}
-          └── Ya
-                     │
-                     ▼
-            [Ambil token UUID]
-                     │
-                     ▼
-   [Cari session di tabel 'sessions' berdasarkan token]
-          ├── Tidak ditemukan ──► Return HTTP 401: {"error": "Unauthorized"}
-          └── Ditemukan
-                     │
-                     ▼
-     [Hapus data session dari tabel 'sessions']
-                     │
-                     ▼
-     [Return HTTP 200: {"data": "OK"}]
-```
-
----
-
-## 4. Tahapan Implementasi Langkah-demi-Langkah
-
-### Tahap 1: Tambahkan Service `logoutUser` di `src/services/users-service.ts`
-1. Buka file `src/services/users-service.ts`.
-2. Buat dan export fungsi `logoutUser(token: string)`:
-   - **Langkah 1.1**: Periksa apakah token ada di database:
-     ```typescript
-     const [session] = await db.select().from(sessions).where(eq(sessions.token, token));
-     if (!session) {
-       throw new Error("unauthorized");
-     }
-     ```
-   - **Langkah 1.2**: Hapus baris session tersebut dari tabel `sessions`:
-     ```typescript
-     await db.delete(sessions).where(eq(sessions.token, token));
-     return true;
+1. **Konfigurasi Script `package.json`**:
+   - Daftarkan perintah pengujian pada `scripts`:
+     ```json
+     "test": "bun test"
      ```
 
----
+2. **Struktur Direktori**:
+   - Buat folder `tests/` di root proyek.
+   - Organisir file test berdasarkan modul/fitur, contohnya:
+     - `tests/root.test.ts` (untuk endpoint root & health check)
+     - `tests/users.test.ts` (untuk semua endpoint di bawah `/api/users`)
+     - Atau dipisah per endpoint sesuai kebutuhan pelaksana.
 
-### Tahap 2: Tambahkan Endpoint `DELETE /logout` di `src/routes/users-route.ts`
-1. Buka file `src/routes/users-route.ts`.
-2. Import fungsi `logoutUser` dari `../services/users-service`.
-3. Tambahkan handler route `.delete('/logout', ...)` pada instance `usersRoute`:
-   ```typescript
-   .delete('/logout', async ({ headers, set }) => {
-     try {
-       const authHeader = headers['authorization'];
-       if (!authHeader || !authHeader.startsWith('Bearer ')) {
-         set.status = 401;
-         return { error: "Unauthorized" };
-       }
-
-       const token = authHeader.substring(7).trim();
-       if (!token) {
-         set.status = 401;
-         return { error: "Unauthorized" };
-       }
-
-       await logoutUser(token);
-       set.status = 200;
-       return { data: "OK" };
-     } catch (error: any) {
-       if (error.message === "unauthorized") {
-         set.status = 401;
-         return { error: "Unauthorized" };
-       }
-       set.status = 500;
-       return { error: "Internal Server Error" };
-     }
-   })
-   ```
+3. **Isolasi Data (Setup & Teardown)**:
+   - Sebelum setiap skenario dijalankan (`beforeEach` / hook serupa), lakukan pembersihan data pada tabel `sessions` dan tabel `users` di database.
+   - Pastikan penghapusan dilakukan dengan urutan yang benar (tabel anak `sessions` terlebih dahulu, lalu tabel induk `users`) untuk menghindari pelanggaran *foreign key constraint*.
 
 ---
 
-### Tahap 3: Pengujian & Verifikasi
+## 3. Daftar Skenario Pengujian per API
 
-Jalankan server aplikasi:
-```bash
-bun run dev
-```
-
-Lakukan skenario pengujian berikut secara berurutan:
-
-#### 1. Login untuk Mendapatkan Token Sesi Baru:
-```bash
-curl -X POST http://localhost:3000/api/users/login \
-  -H "Content-Type: application/json" \
-  -d '{"email": "eko@localhost", "password": "rahasia"}'
-```
-*Salin nilai token yang didapatkan, misalnya: `"TOKEN_SAMPLE_UUID"`.*
-
-#### 2. Uji Logout Berhasil (Token Valid):
-```bash
-curl -X DELETE http://localhost:3000/api/users/logout \
-  -H "Authorization: Bearer <TOKEN_SAMPLE_UUID>"
-```
-- **Ekspektasi Output (HTTP 200)**:
-  ```json
-  {
-    "data": "OK"
-  }
-  ```
-
-#### 3. Verifikasi Token Telah Terhapus (Token Sudah Hangus):
-Gunakan token yang baru saja di-logout untuk memanggil endpoint current user:
-```bash
-curl -X GET http://localhost:3000/api/users/current \
-  -H "Authorization: Bearer <TOKEN_SAMPLE_UUID>"
-```
-- **Ekspektasi Output (HTTP 401)**:
-  ```json
-  {
-    "error": "unauthorized"
-  }
-  ```
-
-Coba juga panggil logout sekali lagi dengan token yang sama:
-```bash
-curl -X DELETE http://localhost:3000/api/users/logout \
-  -H "Authorization: Bearer <TOKEN_SAMPLE_UUID>"
-```
-- **Ekspektasi Output (HTTP 401)**:
-  ```json
-  {
-    "error": "Unauthorized"
-  }
-  ```
-
-#### 4. Uji Gagal - Tanpa Header Authorization:
-```bash
-curl -X DELETE http://localhost:3000/api/users/logout
-```
-- **Ekspektasi Output (HTTP 401)**:
-  ```json
-  {
-    "error": "Unauthorized"
-  }
-  ```
+Pelaksana wajib menguji endpoint aplikasi menggunakan metode request langsung ke instance Elysia (`app.handle(request)`). Berikut adalah seluruh skenario yang wajib dicakup:
 
 ---
 
-## 5. Checklist Kriteria Penyelesaian (Definition of Done)
+### A. Endpoint Root & Health Check
 
-- [ ] Fungsi `logoutUser(token)` tersedia dan diekspor di `src/services/users-service.ts`.
-- [ ] Endpoint `DELETE /api/users/logout` tersedia di `src/routes/users-route.ts`.
-- [ ] Validasi parsing header `Authorization: Bearer <token>` berjalan dengan benar.
-- [ ] Request logout tanpa header mengembalikan status HTTP 401 dengan `{ "error": "Unauthorized" }`.
-- [ ] Request logout dengan token yang tidak ada / salah mengembalikan status HTTP 401 dengan `{ "error": "Unauthorized" }`.
-- [ ] Request logout dengan token valid berhasil menghapus baris session dari tabel `sessions` dan mengembalikan HTTP 200 `{ "data": "OK" }`.
-- [ ] Setelah logout, token yang sama tidak dapat lagi digunakan untuk mengakses endpoint yang dilindungi (seperti `GET /api/users/current`).
+#### 1. `GET /`
+- **Skenario 1.1 (Sukses)**:
+  - Kirim request `GET /`.
+  - Ekspektasi: HTTP Status `200`, respon berupa string text `"Hello World"`.
+
+#### 2. `GET /health`
+- **Skenario 2.1 (Sukses)**:
+  - Kirim request `GET /health`.
+  - Ekspektasi: HTTP Status `200`, respon berupa JSON `{ "status": "ok" }`.
+
+---
+
+### B. Endpoint Registrasi User (`POST /api/users`)
+
+#### 1. Skenario Positif (Happy Path)
+- **Skenario 1.1 (Registrasi Sukses)**:
+  - Kirim payload registrasi yang valid (`name`, `email`, `password`).
+  - Ekspektasi: HTTP Status `200`, respon `{ "data": "Ok" }`.
+  - Verifikasi DB: Data user baru berhasil masuk ke tabel `users`, dan kolom `password` tersimpan dalam bentuk hash bcrypt (tidak tersimpan dalam bentuk *plain text*).
+- **Skenario 1.2 (Boundary Test - Batas Maksimum 255 Karakter)**:
+  - Kirim nilai `name` dengan panjang tepat 255 karakter.
+  - Ekspektasi: HTTP Status `200`, respon `{ "data": "Ok" }`.
+
+#### 2. Skenario Negatif (Validasi Schema / Input)
+- **Skenario 2.1 (Name Kosong)**:
+  - Kirim payload dengan `name` string kosong `""`.
+  - Ekspektasi: HTTP Status `422` (Ditolak oleh validator Elysia).
+- **Skenario 2.2 (Name Melebihi Batas Maksimum)**:
+  - Kirim nilai `name` melebihi 255 karakter (misal: 256 atau 300 karakter).
+  - Ekspektasi: HTTP Status `422` (Ditolak oleh validator, tidak boleh menghasilkan status 500).
+- **Skenario 2.3 (Format Email Tidak Valid)**:
+  - Kirim payload dengan `email` bukan format email (misal: `"bukan-email"`).
+  - Ekspektasi: HTTP Status `422`.
+- **Skenario 2.4 (Email Melebihi Batas Maksimum)**:
+  - Kirim `email` yang melebihi 255 karakter.
+  - Ekspektasi: HTTP Status `422`.
+- **Skenario 2.5 (Password Kosong)**:
+  - Kirim payload dengan `password` string kosong `""`.
+  - Ekspektasi: HTTP Status `422`.
+- **Skenario 2.6 (Password Melebihi Batas Maksimum)**:
+  - Kirim `password` melebihi 255 karakter.
+  - Ekspektasi: HTTP Status `422`.
+- **Skenario 2.7 (Field Wajib Tidak Ada / Missing Fields)**:
+  - Kirim payload tanpa `name`, tanpa `email`, atau tanpa `password`, atau body kosong `{}`.
+  - Ekspektasi: HTTP Status `422`.
+
+#### 3. Skenario Negatif (Aturan Bisnis)
+- **Skenario 3.1 (Email Duplikat)**:
+  - Siapkan user awal di database, kemudian kirim request registrasi dengan email yang sama persis.
+  - Ekspektasi: HTTP Status `400`, respon `{ "error": "email sudah terdaftar" }`.
+
+---
+
+### C. Endpoint Login User (`POST /api/users/login`)
+
+#### 1. Skenario Positif (Happy Path)
+- **Skenario 1.1 (Login Sukses)**:
+  - Siapkan user di database, lalu kirim email dan password yang sesuai.
+  - Ekspektasi: HTTP Status `200`, respon `{ "data": "<token>" }` di mana nilai token merupakan string UUID yang valid.
+  - Verifikasi DB: Sesi baru tersimpan di tabel `sessions` dengan `userId` yang sesuai.
+
+#### 2. Skenario Negatif (Validasi Input)
+- **Skenario 2.1 (Format Email Tidak Valid)**:
+  - Kirim login dengan format email tidak valid.
+  - Ekspektasi: HTTP Status `422`.
+- **Skenario 2.2 (Password Kosong)**:
+  - Kirim login dengan password string kosong.
+  - Ekspektasi: HTTP Status `422`.
+- **Skenario 2.3 (Body Kosong / Field Kurang)**:
+  - Kirim request login tanpa field `email` atau tanpa field `password`.
+  - Ekspektasi: HTTP Status `422`.
+
+#### 3. Skenario Negatif (Aturan Bisnis / Autentikasi)
+- **Skenario 3.1 (Email Tidak Terdaftar)**:
+  - Kirim login dengan email yang belum ada di database.
+  - Ekspektasi: HTTP Status `400`, respon `{ "error": "email atau password salah" }`.
+- **Skenario 3.2 (Password Salah)**:
+  - Siapkan user di database, lalu kirim login dengan email yang terdaftar namun password tidak cocok.
+  - Ekspektasi: HTTP Status `400`, respon `{ "error": "email atau password salah" }`.
+
+---
+
+### D. Endpoint Get Current User (`GET /api/users/current`)
+
+#### 1. Skenario Positif (Happy Path & Keamanan)
+- **Skenario 1.1 (Sukses Mendapatkan Profil User)**:
+  - Siapkan user dan session aktif di database, lalu kirim header `Authorization: Bearer <token_valid>`.
+  - Ekspektasi: HTTP Status `200`, respon `{ "data": { "id": ..., "name": "...", "email": "...", "created_at": "..." } }`.
+- **Skenario 1.2 (Verifikasi Keamanan Password)**:
+  - Periksa respon dari skenario 1.1.
+  - Ekspektasi: Field `password` **tidak boleh ada** di dalam objek `data` demi alasan keamanan.
+
+#### 2. Skenario Negatif (Header & Autentikasi)
+- **Skenario 2.1 (Tanpa Header Authorization)**:
+  - Kirim request tanpa menyertakan header `Authorization`.
+  - Ekspektasi: HTTP Status `401`, respon `{ "error": "unauthorized" }`.
+- **Skenario 2.2 (Format Header Tidak Sesuai / Bukan Bearer)**:
+  - Kirim request dengan header `Authorization: Basic <token>` atau tanpa prefiks `Bearer `.
+  - Ekspektasi: HTTP Status `401`, respon `{ "error": "unauthorized" }`.
+- **Skenario 2.3 (Token Kosong Setelah Bearer)**:
+  - Kirim request dengan header `Authorization: Bearer ` (string token kosong).
+  - Ekspektasi: HTTP Status `401`, respon `{ "error": "unauthorized" }`.
+- **Skenario 2.4 (Token Tidak Ditemukan di Database)**:
+  - Kirim request dengan header `Authorization: Bearer <token_palsu_atau_acak>`.
+  - Ekspektasi: HTTP Status `401`, respon `{ "error": "unauthorized" }`.
+- **Skenario 2.5 (Session Yatim / User Terkait Telah Terhapus)**:
+  - Terdapat baris session di database namun data user acuannya tidak ada di tabel `users`.
+  - Ekspektasi: HTTP Status `401`, respon `{ "error": "unauthorized" }`.
+
+---
+
+## 4. Checklist Kriteria Penyelesaian (Definition of Done)
+
+- [x] Script `"test": "bun test"` terdaftar di `package.json`.
+- [x] Direktori `tests/` telah dibuat dan berisi file unit test.
+- [x] Mekanisme pembersihan database sebelum setiap skenario (`beforeEach`) berfungsi sehingga seluruh skenario independen.
+- [x] Seluruh skenario pengujian untuk endpoint Root (`GET /`) dan Health Check (`GET /health`) terimplementasi.
+- [x] Seluruh skenario pengujian untuk Registrasi User (`POST /api/users`) terimplementasi (positif, validasi batas, email duplikat).
+- [x] Seluruh skenario pengujian untuk Login User (`POST /api/users/login`) terimplementasi (positif, validasi, kredensial salah).
+- [x] Seluruh skenario pengujian untuk Current User (`GET /api/users/current`) terimplementasi (positif, keamanan password, unauthorized header).
+- [x] Semua test dapat dijalankan sekaligus dengan perintah `bun test` dan berstatus **100% PASS** tanpa error atau *race condition*.
