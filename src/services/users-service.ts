@@ -72,3 +72,15 @@ export async function getCurrentUser(token: string) {
     created_at: user.createdAt,
   };
 }
+
+export async function logoutUser(token: string) {
+  // Cari session berdasarkan token
+  const [session] = await db.select().from(sessions).where(eq(sessions.token, token));
+  if (!session) {
+    throw new Error("unauthorized");
+  }
+
+  // Hapus session dari database
+  await db.delete(sessions).where(eq(sessions.token, token));
+  return true;
+}
